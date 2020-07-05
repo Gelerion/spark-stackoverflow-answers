@@ -1,0 +1,5 @@
+ROWNUM,SOME_INT,SOME_STRING
+1,12,aaa
+2,NA,bbb
+4,NA,ddd
+3,32,ccc

@@ -1,0 +1,87 @@
+High Order Functions:
+!! Unlike the previous approaches in order to solve the problem of nested data manipulations,
+   higher-order functions come without an extra serialization or shuffle overhead.
+
+ 1. transform - maps the content of the array with the defined mapping function:
+      val lettersDataset = Seq((Array("a", "b", "c"))).toDF("letters")
+      val transformedLetters = lettersDataset.selectExpr("transform(letters, (letter, i) -> concat(\"index \", i, \" value = \", letter)) AS transformed_letters")
+      //"index 0 value = a, index 1 value = b, index 2 value = c"
+
+ 2. filter - applies predicate on all nested values and returns an array with the elements matching the predicate:
+      val lettersDataset = Seq((Array("a", "b", "c"))).toDF("letters")
+      val filteredLetters = lettersDataset.selectExpr("filter(letters, letter -> letter == 'a') AS filtered_letters")
+      //"a, a"
+
+ 3. aggregate - returns a single value generated from an array, an initial state and an aggregate function:
+      val lettersDataset = Seq((Array("a", "b", "c"))).toDF("letters")
+      val aggregatedLetters = lettersDataset.selectExpr("aggregate(letters, 'letters', (lettersPrefix, letter) -> concat(lettersPrefix, ' -> ', letter)) AS aggregated_letters")
+      //"letters -> a -> b -> c"
+
+ 4. exists - checks whether an array contains at least one element that can be evaluated as true after applying the predicate on it:
+      val testedDataset = Seq((Array("a", "b", "c", "d")), (Array("e", "f", "g"))).toDF("letters")
+      val existenceFlag = testedDataset.selectExpr("exists(letters, letter -> letter = 'a') AS existence_flag")
+      //true, false
+
+ 5. zip_with - merges 2 arrays of the same length into a new array with a merge function:
+      val lettersDataset = Seq((Array("a", "b", "c"), Array("d", "e", "f"))).toDF("letters1", "letters2")
+      val zippedLetters = lettersDataset.selectExpr("zip_with(letters1, letters2,  (letter1, letter2) -> concat(letter1, ' -> ', letter2)) AS zipped_letters")
+      //"a -> d, b -> e, c -> f"
+
+The execution plan is nothing more than a new projection with a renamed field in return. This new field is created
+with one of the expressions added in the release 2.4.0. The operations are working on 2 implement elements
+BinaryArrayExpressionWithImplicitCast trait, while the rest use UnaryExpression one. The generated execution
+code varies from one function to another but globally they look very similar to the code we would write with the help of UDFs:
+    reverse
+    s"""
+       |final int $numElements = $childName.numElements();
+       |$initialization
+       |for (int $i = 0; $i < $numElements; $i++) {
+       |  int $j = $numElements - $i - 1;
+       |  $assignment
+       |}
+       |${ev.value} = $arrayData;
+     """.stripMargin
+
+    array_position
+    s"""
+       |int $pos = 0;
+       |for (int $i = 0; $i < $arr.numElements(); $i ++) {
+       |  if (!$arr.isNullAt($i) && ${ctx.genEqual(right.dataType, value, getValue)}) {
+       |    $pos = $i + 1;
+       |    break;
+       |  }
+       |}
+       |${ev.value} = (long) $pos;
+     """.stripMargin
+
+The above applies to most new functions but not to the higher-order functions which use another
+new concept of Apache Spark 2.4.0 - org.apache.spark.sql.catalyst.expressions.LambdaFunction expression
+
+The execution depends on the operation. The execution depends on the operation. For instance, the transform function ,
+which is the synonymous of map operation in functional programming, does the following:
+
+val f = functionForEval
+val result = new GenericArrayData(new Array[Any](arr.numElements))
+var i = 0
+while (i < arr.numElements) {
+  elementVar.value.set(arr.get(i, elementVar.dataType))
+  if (indexVar.isDefined) {
+    indexVar.get.value.set(i)
+  }
+  result.update(i, f.eval(inputRow))
+  i += 1
+}
+result
+
+array_filter is responsible for:
+val f = functionForEval
+var exists = false
+var i = 0
+while (i < arr.numElements && !exists) {
+  elementVar.value.set(arr.get(i, elementVar.dataType))
+  if (f.eval(inputRow).asInstanceOf[Boolean]) {
+    exists = true
+  }
+  i += 1
+}
+exists

@@ -1,0 +1,2 @@
+{"Name": "helloworld","info": { "privateInfo": [ {"salary":1200}, {"sex":"M"}],"house": "sky road" },"otherinfo":2}
+{"Name": "helloworld2","info": { "privateInfo": [ {"sex":"M"}],"house": "sky road"},"otherinfo":3}
